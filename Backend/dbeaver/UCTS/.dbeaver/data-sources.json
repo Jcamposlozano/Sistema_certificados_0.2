@@ -1,0 +1,23 @@
+{
+  "folders": {},
+  "connections": {
+    "postgres-jdbc-ucts-zone-local": {
+      "provider": "postgresql",
+      "driver": "postgres-jdbc",
+      "name": "UCTS Zone · Local",
+      "description": "PostgreSQL Docker local, puerto 5433",
+      "save-password": false,
+      "read-only": false,
+      "configuration": {
+        "host": "localhost",
+        "port": "5433",
+        "database": "ucts_zone",
+        "url": "jdbc:postgresql://localhost:5433/ucts_zone",
+        "configurationType": "MANUAL",
+        "type": "dev",
+        "auth-model": "native",
+        "auth-properties": { "userName": "ucts" }
+      }
+    }
+  }
+}
