@@ -1,0 +1,58 @@
+{
+  "template_id": "simposio-poster",
+  "label": "Simposio Certificate",
+  "description": "Presentacion Poster",
+
+  "html_file": "template.html",
+  "css_file": "styles.css",
+
+  "assets": {
+    "background_image": "assets/background.png"
+  },
+
+  "defaults": {},
+
+  "required_fields": [
+    "nombre",
+    "tipo_asistencia",
+    "nombre_poster",
+    "autores"
+  ],
+
+  "form": {
+    "fields": [
+      {
+        "key": "nombre",
+        "label": "nombre del participante",
+        "type": "text",
+        "required": true,
+        "placeholder": "Nombre y apellidos",
+        "order": 1
+      },
+      {
+        "key": "tipo_asistencia",
+        "label": "Tipo de participación",
+        "type": "text",
+        "required": true,
+        "placeholder": "Asistente",
+        "order": 2
+      },
+        {
+        "key": "nombre_poster",
+        "label": "Nombre del Poster",
+        "type": "text",
+        "required": true,
+        "placeholder": "Nombre del trabajo presentado",
+        "order": 3
+      },
+         {
+        "key": "autores",
+        "label": "Nombre de los autores",
+        "type": "text",
+        "required": true,
+        "placeholder": "Juan , Pedro",
+        "order": 4
+      }
+    ]
+  }
+}

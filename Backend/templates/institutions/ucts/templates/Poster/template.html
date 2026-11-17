@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Certificado de póster</title>
+  <style>
+    {{ css_content }}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <img src="{{ background_image }}" alt="" class="background-image" />
+
+    {% set text_length = (autores | length) + (nombre_poster | length) %}
+    <main class="content{% if text_length > 1000 %} content--dense{% elif text_length > 500 %} content--compact{% endif %}">
+      <p class="recipient-line">
+        <span>{{ nombre }}</span>
+      </p>
+
+      <p class="description-line">
+        Participó como <strong>{{ tipo_asistencia }}</strong> de póster en el IV Simposio de Investigación: 
+        Ciencia Traslacional - conectando ideas que transforman la salud, realizado el 17 de 
+        septiembre de 2026, con el trabajo titulado: <strong>«{{ nombre_poster }}»</strong>.
+      </p>
+
+      <p class="authors-line">
+        <span class="authors-label">Autores:</span> <strong>{{ autores }}</strong>
+      </p>
+
+      <p class="certificate-note">Se expide el presente certificado como constancia de su participación.</p>
+    </main>
+  </div>
+</body>
+</html>

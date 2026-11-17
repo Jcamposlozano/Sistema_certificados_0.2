@@ -97,9 +97,9 @@ def create_app(
         )
 
     if certificate_generator is None and settings.certificate_generator_enabled:
-        from app.api.routes import certificate_service
-
-        certificate_generator = CertificateServiceGenerator(certificate_service, "ucts")
+        certificate_generator = CertificateServiceGenerator.from_local_templates(
+            settings.local_templates_dir, "ucts"
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

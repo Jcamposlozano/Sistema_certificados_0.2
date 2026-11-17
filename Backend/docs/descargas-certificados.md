@@ -1,7 +1,7 @@
 # Generación y auditoría de certificados UCTS
 
 FastAPI importa el generador PDF de `certificate-service` dentro de su propio
-proceso. Angular mantiene el proxy a `127.0.0.1:8000` y descarga por
+proceso. Las plantillas se leen de `Backend/templates` por defecto. Angular mantiene el proxy a `127.0.0.1:8000` y descarga por
 `GET /api/me/certificates/{id}`. La sesión determina el titular. FastAPI obtiene
 el nombre, la identificación, el tipo de asistencia, el taller y el ID de
 plantilla desde el catálogo, y los entrega al generador. Los certificados de
@@ -28,7 +28,6 @@ AWS_PROFILE=ucts-cert-lab \
 CERTIFICATE_CATALOG_SQLITE=data/ucts_certificados.sqlite \
 DATABASE_URL=sqlite:///data/ucts_auth.sqlite \
 CERTIFICATE_GENERATOR_ENABLED=true \
-TEMPLATE_STORAGE=local \
 DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib" \
 .venv/bin/uvicorn \
   --app-dir /Users/jonathancamposlozano/Documents/UCTS/certificate-service \

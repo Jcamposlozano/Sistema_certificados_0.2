@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Certificado Simposio</title>
+  <style>
+    {{ css_content }}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <img src="{{ background_image }}" alt="" class="background-image" />
+
+    <main class="content">
+      <p class="recipient-line">
+        <span>{{ nombre }}</span>
+        <span> con documento de identidad número </span>
+        <span>{{ identificacion }}</span>
+      </p>
+
+      <p class="description-line">
+        Participó como <strong>{{ tipo_asistencia }}</strong>
+        en {{ nombre_taller }} durante el IV simposio de investigación: Ciencia Traslacional - 
+        conectando ideas que transforman la salud-, realizado el 17 de septiembre de 2026, 
+        como espacio académico para el intercambio de conocimientos, experiencias e iniciativas 
+        de investigación orientadas a la transformación de la salud desde una perspectiva 
+        traslacional.
+      </p>
+
+      <p class="certificate-note">Se expide el presente certificado como constancia de su participación.</p>
+    </main>
+  </div>
+</body>
+</html>

@@ -12,7 +12,8 @@ PDF de `certificate-service`. El único puerto publicado es
 | `Backend/data/ucts_certificados.sqlite` | Catálogo de participantes y certificados que FastAPI abre en solo lectura. |
 | `Backend/data/ucts_auth.sqlite` | Sesiones, desafíos, vínculos Cognito y auditoría de descargas. El directorio de datos se monta para conservar tanto la base como los archivos de transacción de SQLite. |
 | `Backend/.env` | Región, User Pool, App Client y secretos del backend. Se lee al arrancar el contenedor. |
-| `../certificate-service/app` y `../certificate-service/templates` | Código del generador durante la construcción y plantillas montadas en solo lectura durante el arranque. |
+| `Backend/templates` | Plantillas UCTS montadas en solo lectura en `/templates`. |
+| `../certificate-service/app` | Código del generador durante la construcción. |
 | `~/.aws` | Configuración y credenciales locales leídas en modo de solo lectura. El perfil predeterminado es `ucts-cert-lab`. |
 
 Si usas otra ubicación, puedes exportar `BETA_CERTIFICATE_SERVICE_DIR`,

@@ -1,0 +1,58 @@
+{
+  "template_id": "simposio-taller",
+  "label": "Simposio Certificate",
+  "description": "Certificado de Taller IV Simposio",
+
+  "html_file": "template.html",
+  "css_file": "styles.css",
+
+  "assets": {
+    "background_image": "assets/background.png"
+  },
+
+  "defaults": {},
+
+  "required_fields": [
+    "nombre",
+    "identificacion",
+    "tipo_asistencia",
+    "nombre_taller"
+  ],
+
+  "form": {
+    "fields": [
+      {
+        "key": "nombre",
+        "label": "nombre del participante",
+        "type": "text",
+        "required": true,
+        "placeholder": "Nombre y apellidos",
+        "order": 1
+      },
+      {
+        "key": "identificacion",
+        "label": "Número de identificación",
+        "type": "text",
+        "required": true,
+        "placeholder": "123456789",
+        "order": 2
+      },
+      {
+        "key": "tipo_asistencia",
+        "label": "Tipo de participación",
+        "type": "text",
+        "required": true,
+        "placeholder": "Asistente",
+        "order": 3
+      },
+      {
+        "key": "nombre_taller",
+        "label": "Nombre del taller",
+        "type": "text",
+        "required": true,
+        "placeholder": "Podcast Lounge: Escucha a quienes estan trasnsformando la ciencia y la educación",
+        "order": 3
+      }
+    ]
+  }
+}

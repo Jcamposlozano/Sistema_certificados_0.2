@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     )
     certificate_catalog_sqlite: Path | None = None
     certificate_generator_enabled: bool = False
+    local_templates_dir: Path = Path(__file__).resolve().parents[2] / "templates"
     cognito_user_pool_id: str = ""
     cognito_client_id: str = ""
     cognito_client_secret: str = Field(default="", repr=False)

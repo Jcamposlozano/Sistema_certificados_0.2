@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from ucts.adapters.documents.s3 import MAX_PDF_BYTES
 from ucts.domain.models import AppError, Certificate, ErrorKind
@@ -12,6 +13,22 @@ class CertificateServiceGenerator:
     def __init__(self, service, institution_id: str):
         self.service = service
         self.institution_id = institution_id
+
+    @classmethod
+    def from_local_templates(
+        cls, directory: Path, institution_id: str
+    ) -> "CertificateServiceGenerator":
+        from app.repositories.local_template_repository import LocalTemplateRepository
+        from app.services.certificate_service import CertificateService
+        from app.services.pdf_service import PdfService
+        from app.services.template_render_service import TemplateRenderService
+
+        service = CertificateService(
+            template_repository=LocalTemplateRepository(directory),
+            render_service=TemplateRenderService(),
+            pdf_service=PdfService(),
+        )
+        return cls(service, institution_id)
 
     @staticmethod
     def _fields(certificate: Certificate) -> dict[str, str]:

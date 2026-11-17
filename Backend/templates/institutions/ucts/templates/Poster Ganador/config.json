@@ -1,0 +1,53 @@
+{
+  "template_id": "simposio-poster-ganador",
+  "label": "Simposio Certificate Ganador",
+  "description": "Presentacion Poster Ganador",
+  "html_file": "template.html",
+  "css_file": "styles.css",
+  "assets": {
+    "background_image": "assets/background.png"
+  },
+  "defaults": {},
+  "required_fields": [
+    "nombre",
+    "lugar",
+    "nombre_poster",
+    "autores"
+  ],
+  "form": {
+    "fields": [
+      {
+        "key": "nombre",
+        "label": "nombre del participante",
+        "type": "text",
+        "required": true,
+        "placeholder": "Nombre y apellidos",
+        "order": 1
+      },
+      {
+        "key": "lugar",
+        "label": "Premiasion",
+        "type": "text",
+        "required": true,
+        "placeholder": "Primer",
+        "order": 2
+      },
+      {
+        "key": "nombre_poster",
+        "label": "Nombre del Poster",
+        "type": "text",
+        "required": true,
+        "placeholder": "Nombre del trabajo presentado",
+        "order": 3
+      },
+      {
+        "key": "autores",
+        "label": "Nombre de los autores",
+        "type": "text",
+        "required": true,
+        "placeholder": "Juan , Pedro",
+        "order": 4
+      }
+    ]
+  }
+}

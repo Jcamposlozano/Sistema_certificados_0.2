@@ -1,0 +1,156 @@
+@page {
+  size: A4 landscape;
+  margin: 0;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #efefef;
+}
+
+.page {
+  position: relative;
+  width: 297mm;
+  height: 210mm;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 8mm 18mm rgba(0, 0, 0, 0.18);
+}
+
+.background-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+/* All paragraphs share one flow so long author lists push the note down. */
+.content {
+  position: absolute;
+  z-index: 1;
+  top: 92mm;
+  left: 30mm;
+  width: 237mm;
+  color: #111111;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.content p {
+  margin: 0;
+}
+
+.recipient-line {
+  font-size: 4.6mm;
+  line-height: 1.2;
+}
+
+.recipient-line span:first-child {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.content .description-line {
+  margin-top: 4mm;
+  font-size: 4mm;
+  line-height: 1.2;
+}
+
+.content .authors-line {
+  margin-top: 3mm;
+  font-size: 3.4mm;
+  line-height: 1.2;
+}
+
+.authors-label {
+  font-weight: 400;
+}
+
+.content .certificate-note {
+  margin-top: 4mm;
+  font-size: 3.4mm;
+  line-height: 1.2;
+}
+
+/* Reserve more room above the signatures for especially long submissions. */
+.content--compact .description-line {
+  font-size: 3.6mm;
+}
+
+.content--compact .authors-line {
+  font-size: 3mm;
+}
+
+.content--dense .description-line {
+  font-size: 3.4mm;
+}
+
+.content--dense .authors-line {
+  font-size: 2.7mm;
+}
+
+@media screen and (max-width: 1200px) {
+  .page {
+    width: min(100vw, calc(100vh * 1.4142857));
+    height: min(100vh, calc(100vw / 1.4142857));
+  }
+
+  .content {
+    top: 43.81%;
+    left: 10.1%;
+    width: 79.8%;
+  }
+
+  .recipient-line {
+    font-size: min(1.55vw, 2.19vh);
+  }
+
+  .content .description-line {
+    margin-top: min(1.35vw, 1.9vh);
+    font-size: min(1.35vw, 1.9vh);
+  }
+
+  .content .authors-line {
+    margin-top: min(1.01vw, 1.43vh);
+    font-size: min(1.14vw, 1.62vh);
+  }
+
+  .content .certificate-note {
+    margin-top: min(1.35vw, 1.9vh);
+    font-size: min(1.14vw, 1.62vh);
+  }
+
+  .content--compact .description-line {
+    font-size: min(1.21vw, 1.71vh);
+  }
+
+  .content--compact .authors-line {
+    font-size: min(1.01vw, 1.43vh);
+  }
+
+  .content--dense .description-line {
+    font-size: min(1.14vw, 1.62vh);
+  }
+
+  .content--dense .authors-line {
+    font-size: min(0.91vw, 1.29vh);
+  }
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff;
+  }
+
+  .page {
+    box-shadow: none;
+  }
+}
