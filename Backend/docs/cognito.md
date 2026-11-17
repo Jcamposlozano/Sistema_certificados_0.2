@@ -170,3 +170,110 @@ esos avisos, además de Cognito y SES, sin divulgar información de la cuenta.
 
 Para pruebas automatizadas, en `Backend` ejecuta `.venv/bin/python -m pytest -q`.
 En `Fronted/ucts-zone` ejecuta `npm test -- --watch=false` y `npm run build`.
+
+
+## Recuperación de credenciales IAM en EC2
+
+La administración del User Pool requiere solicitudes firmadas. El código anterior
+creaba ese cliente en `create_app`, durante el arranque. Si en ese instante la
+cadena de credenciales no encontraba el rol, el firmante del cliente conservaba
+`None`. Una nueva sesión boto3 abierta desde `docker exec` podía resolver
+`iam-role` mientras el cliente ya creado en Uvicorn seguía fallando.
+La regresión automatizada reproduce esa diferencia de momentos.
+NoCredentialsError ocurre antes de que AWS evalúe los permisos IAM.
+
+El cliente administrativo se crea ahora al procesar la solicitud mediante una
+sesión boto3 nueva. Usa la cadena estándar, la región explícita de `AWS_REGION`
+y credenciales temporales renovables. Una solicitud posterior vuelve a resolver
+la cadena si la anterior falló. El cliente se cierra al finalizar la comprobación
+y el eventual alta. El cliente de autenticación sigue usando las operaciones
+públicas `InitiateAuth`, `RespondToAuthChallenge` y `GetUser`.
+
+Un fallo operativo de credenciales o configuración devuelve `503` y un límite
+de Cognito devuelve `429`. Los límites locales se conservan también tras un
+fallo operativo. Para un correo sin autorización o una cuenta inelegible se
+mantiene la respuesta genérica. El mensaje público nunca confirma la entrega.
+La recepción final se comprueba en SES y en el buzón.
+
+Los registros JSON incluyen `event`, `operation`, `code` y, cuando AWS lo
+devuelve, `request_id`. Distinguen errores de credenciales, permisos,
+configuración, entrega y throttling. El registro
+`cognito_credentials_resolved` indica el método de credenciales y la región.
+El contenido de errores AWS se omite porque puede contener datos de la cuenta.
+
+### Variables y permisos efectivos
+
+En EC2 configura `AWS_REGION=us-east-2`, `COGNITO_USER_POOL_ID`,
+`COGNITO_CLIENT_ID`, `COGNITO_CLIENT_SECRET`, `OTP_SECRET` y las rutas SQLite
+como se describe arriba. El Compose de EC2 habilita IMDSv2 y elimina perfiles y
+claves estáticas del entorno efectivo. La región de una sesión boto3 sin
+configuración puede ser `None`; los clientes de Cognito reciben región explícita.
+
+El rol `ucts-registros-ec2-role` necesita únicamente las acciones administrativas
+`cognito-idp:AdminGetUser` y `cognito-idp:AdminCreateUser` para el flujo actual,
+limitadas al recurso
+`arn:aws:cognito-idp:us-east-2:721605752627:userpool/us-east-2_S2qsWPDFm`.
+Los permisos de `DescribeUserPool` y `DescribeUserPoolClient` sirven para
+diagnosticar la configuración y pueden pertenecer al administrador que la revisa.
+Un rechazo de esas consultas no demuestra que falten permisos de login.
+
+### Actualizar el backend después de revisar el PR
+
+En EC2, guarda el identificador de imagen antes de actualizar el código:
+
+```bash
+cd ~/Sistema_certificados_0.2
+previous_image=$(docker inspect -f '{{.Image}}' ucts-beta-backend-1)
+docker tag "$previous_image" ucts-beta-backend:before-otp-fix
+```
+
+Actualiza a la revisión aprobada y reconstruye solo el backend:
+
+```bash
+export BETA_UID="$(id -u)" BETA_GID="$(id -g)"
+unset AWS_PROFILE AWS_DEFAULT_PROFILE
+docker compose -f compose.beta.yaml -f compose.ec2.yaml build backend
+docker compose -f compose.beta.yaml -f compose.ec2.yaml \
+  up -d --no-deps --no-build --wait backend
+curl -fsS http://127.0.0.1:8000/health/ready
+docker compose -f compose.beta.yaml -f compose.ec2.yaml logs -f backend
+```
+
+Desde `https://uctszone.net/certificados`, solicita un código con un único
+correo principal autorizado. Comprueba el método `iam-role` en el registro,
+el desafío `EMAIL_OTP`, la recepción en el buzón y la respuesta `204` de
+verificación. `GET https://api.uctszone.net/api/me` debe pasar de `401` sin
+sesión a `200` con la cookie. Comprueba que cerrar sesión vuelve a producir
+`401`. Si una solicitud falla, espera el intervalo local antes de repetir.
+
+Para rollback, etiqueta la imagen guardada como la imagen utilizada por Compose
+y vuelve a crear el backend. Los archivos SQLite quedan en sus montajes.
+
+```bash
+docker tag ucts-beta-backend:before-otp-fix ucts-beta-backend:local
+docker compose -f compose.beta.yaml -f compose.ec2.yaml \
+  up -d --no-deps --no-build --force-recreate --wait backend
+```
+
+
+### Revisión de configuración sin enviar códigos
+
+Si un administrador dispone de los permisos de lectura correspondientes,
+puede verificar el pool y el cliente con AWS CLI. Las consultas excluyen
+el secreto del cliente:
+
+```bash
+aws cognito-idp describe-user-pool \
+  --region us-east-2 --user-pool-id us-east-2_S2qsWPDFm \
+  --query 'UserPool.{Id:Id,Factors:Policies.SignInPolicy.AllowedFirstAuthFactors}'
+aws cognito-idp describe-user-pool-client \
+  --region us-east-2 --user-pool-id us-east-2_S2qsWPDFm \
+  --client-id 7v03sfiuv9d9nk1va6t27hkmcf \
+  --query 'UserPoolClient.{Pool:UserPoolId,Client:ClientId,Flows:ExplicitAuthFlows}'
+```
+
+Confirma `EMAIL_OTP` entre los primeros factores, el pool esperado en el cliente
+y `ALLOW_USER_AUTH` entre los flujos. La comprobación real contra AWS de esta
+corrección sigue pendiente; el intento de conexión SSH al preparar el PR agotó
+el tiempo de espera. Las pruebas automatizadas utilizan proveedores de
+credenciales y respuestas AWS simulados, sin enviar códigos.

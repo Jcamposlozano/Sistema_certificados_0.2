@@ -1,4 +1,5 @@
 import json
+from contextlib import closing
 
 import boto3
 import pytest
@@ -267,7 +268,7 @@ def test_confidential_cognito_checks_account_and_hashes_each_challenge(cognito, 
             assert provider.verify(email, state, "123456").subject == subject
 
 
-def test_admin_failure_uses_generic_state_without_logging_credentials(cognito, caplog):
+def test_admin_failure_reports_unavailable_without_logging_credentials(cognito, caplog):
     provider, stub = cognito
     pool = CognitoUserPool(provider.client, "us-east-2_synthetic")
     email = "principal@example.org"
@@ -280,7 +281,137 @@ def test_admin_failure_uses_generic_state_without_logging_credentials(cognito, c
     confidential = CognitoIdentityProvider(
         provider.client, "client123", "test-secret", user_pool=pool
     )
-    assert json.loads(confidential.request(email, "uuid-local")) == {"unavailable": True}
+    with pytest.raises(AppError) as error:
+        confidential.request(email, "uuid-local")
+    assert error.value.kind == ErrorKind.UNAVAILABLE
     assert "AccessDeniedException" in caplog.text
     assert email not in caplog.text
     assert "test-secret" not in caplog.text
+
+
+def test_standard_chain_is_resolved_at_request_time_with_explicit_region(monkeypatch):
+    import botocore.session
+    from botocore.credentials import CredentialProvider, Credentials
+
+    from ucts.adapters.identity.cognito import administrative_client
+
+    class InstanceRole(CredentialProvider):
+        METHOD = "iam-role"
+        available = False
+
+        def load(self):
+            if self.available:
+                return Credentials(
+                    "synthetic-key", "synthetic-secret", "synthetic-token", method=self.METHOD
+                )
+            return None
+
+    role = InstanceRole()
+    session_class = boto3.Session
+
+    def session():
+        core = botocore.session.get_session()
+        core.get_component("credential_provider").providers = [role]
+        return session_class(botocore_session=core)
+
+    monkeypatch.setattr("ucts.adapters.identity.cognito.boto3.Session", session)
+    from botocore.exceptions import NoCredentialsError
+
+    with pytest.raises(NoCredentialsError):
+        administrative_client("us-east-2")
+    # Model the previous startup behavior: a signer constructed before IMDS was ready.
+    with closing(session().client("cognito-idp", region_name="us-east-2")) as stale:
+        assert stale._request_signer._credentials is None
+        role.available = True
+        assert stale._request_signer._credentials is None
+        with closing(administrative_client("us-east-2")) as current:
+            assert current.meta.region_name == "us-east-2"
+            assert current._request_signer._credentials.method == "iam-role"
+
+
+def test_missing_role_then_recovery_does_not_cache_unsigned_admin_client(cognito):
+    from unittest.mock import Mock
+
+    from botocore.exceptions import NoCredentialsError
+
+    client, stub = cognito[0].client, cognito[1]
+    factory = Mock(side_effect=[NoCredentialsError(), client])
+    pool = CognitoUserPool(None, "us-east-2_synthetic", client_factory=factory)
+    with pytest.raises(AppError) as error:
+        pool.ensure_user("principal@example.org")
+    assert error.value.kind == ErrorKind.UNAVAILABLE
+    stub.add_response(
+        "admin_get_user",
+        {
+            "Username": "canonical",
+            "Enabled": True,
+            "UserStatus": "CONFIRMED",
+            "UserAttributes": [
+                {"Name": "email", "Value": "principal@example.org"},
+                {"Name": "sub", "Value": "subject123"},
+            ],
+        },
+        {"UserPoolId": pool.pool_id, "Username": "principal@example.org"},
+    )
+    assert pool.ensure_user("principal@example.org") == "subject123"
+    assert factory.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "code,kind",
+    [
+        ("AccessDeniedException", ErrorKind.UNAVAILABLE),
+        ("ResourceNotFoundException", ErrorKind.UNAVAILABLE),
+        ("InvalidParameterException", ErrorKind.UNAVAILABLE),
+        ("CodeDeliveryFailureException", ErrorKind.UNAVAILABLE),
+        ("TooManyRequestsException", ErrorKind.RATE_LIMITED),
+    ],
+)
+def test_aws_request_errors_are_diagnostic_and_not_success(cognito, caplog, code, kind):
+    client, stub = cognito[0].client, cognito[1]
+    provider = CognitoIdentityProvider(client, "client123")
+    stub.add_client_error(
+        "initiate_auth",
+        service_error_code=code,
+        service_message="sensitive-message-not-for-logs",
+        response_meta={"RequestId": "request-id"},
+    )
+    with pytest.raises(AppError) as error:
+        provider.request("principal@example.org")
+    assert error.value.kind == kind
+    entries = [
+        json.loads(record.message) for record in caplog.records if record.message.startswith("{")
+    ]
+    assert {
+        "event": "cognito_operation_failed",
+        "operation": "initiate_auth",
+        "code": code,
+        "request_id": "request-id",
+    } in entries
+    assert "sensitive-message-not-for-logs" not in caplog.text
+    assert "principal@example.org" not in caplog.text
+
+
+def test_cognito_construction_defers_signed_credentials(engine, settings, monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from ucts.main import create_app
+
+    catalog = tmp_path / "catalog.sqlite"
+    catalog.touch()
+    config = settings.model_copy(
+        update={
+            "auth_mode": "cognito",
+            "certificate_catalog_sqlite": catalog,
+            "cognito_client_id": "synthetic-client",
+            "cognito_client_secret": "synthetic-secret",
+            "cognito_user_pool_id": "us-east-2_synthetic",
+            "aws_region": "us-east-2",
+        }
+    )
+    deferred = Mock(side_effect=AssertionError("Credentials should be resolved by request"))
+    monkeypatch.setattr("ucts.main.administrative_client", deferred)
+    monkeypatch.setattr("ucts.main.boto3.client", Mock())
+    app = create_app(config, engine=engine)
+    assert app.state.auth.provider.user_pool.client is None
+    deferred.assert_not_called()

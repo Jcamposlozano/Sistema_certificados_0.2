@@ -16,7 +16,11 @@ from ucts.adapters.documents.certificate_service import CertificateServiceGenera
 from ucts.adapters.documents.pdf import PdfCertificateRenderer
 from ucts.adapters.documents.s3 import S3CertificateStore
 from ucts.adapters.http.api import router
-from ucts.adapters.identity.cognito import CognitoIdentityProvider, CognitoUserPool
+from ucts.adapters.identity.cognito import (
+    CognitoIdentityProvider,
+    CognitoUserPool,
+    administrative_client,
+)
 from ucts.adapters.identity.local import LocalIdentityProvider
 from ucts.adapters.persistence.repository import SqlUnitOfWork
 from ucts.adapters.persistence.sqlite_catalog import (
@@ -60,14 +64,9 @@ def create_app(
             user_pool = None
             if catalog and settings.cognito_user_pool_id:
                 user_pool = CognitoUserPool(
-                    boto3.client(
-                        "cognito-idp",
-                        region_name=settings.aws_region,
-                        config=Config(
-                            connect_timeout=5, read_timeout=10, retries={"max_attempts": 0}
-                        ),
-                    ),
+                    None,
                     settings.cognito_user_pool_id,
+                    client_factory=partial(administrative_client, settings.aws_region),
                 )
             provider = CognitoIdentityProvider(
                 boto3.client(
