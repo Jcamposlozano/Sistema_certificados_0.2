@@ -1,0 +1,40 @@
+services:
+  backend:
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      COOKIE_SECURE: "true"
+      ALLOWED_ORIGINS: '["https://${UCTS_PUBLIC_HOSTNAME:-uctszone.net}"]'
+      ALLOWED_HOSTS: >-
+        ["${UCTS_PUBLIC_HOSTNAME:-uctszone.net}","api.uctszone.net",
+        "127.0.0.1","localhost","backend"]
+      AWS_PROFILE: null
+      AWS_DEFAULT_PROFILE: null
+      AWS_CONFIG_FILE: /dev/null
+      AWS_SHARED_CREDENTIALS_FILE: /dev/null
+      AWS_ACCESS_KEY_ID: ""
+      AWS_SECRET_ACCESS_KEY: ""
+      AWS_SESSION_TOKEN: ""
+      AWS_EC2_METADATA_DISABLED: "false"
+      AWS_EC2_METADATA_V1_DISABLED: "true"
+    volumes: !override
+      - type: bind
+        source: ${BETA_DATA_DIR:-./Backend/data}
+        target: /state
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BETA_DATA_DIR:-./Backend/data}/ucts_certificados.sqlite
+        target: /catalog/ucts_certificados.sqlite
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./Backend/templates
+        target: /templates
+        read_only: true
+        bind:
+          create_host_path: false
+
+  frontend:
+    restart: unless-stopped
