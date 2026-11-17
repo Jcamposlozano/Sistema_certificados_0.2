@@ -47,7 +47,7 @@ def settings():
 
 
 @pytest.fixture
-def client(engine, settings):
+def client(engine, settings, seeded):
     with TestClient(create_app(settings, engine=engine)) as client:
         yield client
 

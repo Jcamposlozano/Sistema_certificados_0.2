@@ -1,31 +1,180 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
+import { afterNextRender, Component, DestroyRef, DOCUMENT, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { CertificateService, UctsEvent } from '../core/certificate.service';
-@Component({ selector:'app-certificates', imports:[ReactiveFormsModule], styleUrl:'./certificates.scss', template:`
-<section class="wrap certificates"><div class="page-heading"><div><span class="eyebrow">TU PARTICIPACIÓN TIENE VALOR</span><h1>Mis certificados<span>.</span></h1><p class="muted">Cada experiencia cuenta. Encuentra aquí el reconocimiento a tu participación.</p></div>@if (service.authenticated()) {<button class="button secondary" (click)="logout()">Cerrar sesión ↗</button>}</div>
-<p class="notice"><strong>Modo demostración.</strong> Los eventos son de ejemplo. No se envían correos ni se conecta con AWS. Usa el código <strong>123456</strong> para explorar.</p>
-@if (!service.authenticated()) {
-<div class="access-layout"><aside><span class="eyebrow">UN ACCESO SIMPLE Y SEGURO</span><h2>Tus experiencias.<br>Tu reconocimiento.</h2><p class="muted">Ingresa con el mismo correo que utilizaste al inscribirte a los eventos de UCTS.</p><div class="benefit"><span>01</span><div><strong>Sin contraseñas</strong><p>Un código de acceso a tu correo.</p></div></div><div class="benefit"><span>02</span><div><strong>Todo en un lugar</strong><p>Tus eventos y certificados disponibles.</p></div></div><div class="access-decoration" aria-hidden="true">✳ <span>Tu próximo logro<br>empieza contigo.</span></div></aside><div class="access-card"><div class="card-icon" aria-hidden="true">{{step() === 'email' ? '↗' : '✉'}}</div><span class="eyebrow">PASO {{step() === 'email' ? '01' : '02'}} DE 02</span><h2>{{step() === 'email' ? 'Bienvenido a tu espacio' : 'Revisa tu correo'}}</h2>
-@if(step() === 'email') {<p class="muted">Escribe tu correo para recibir un código de verificación.</p><form [formGroup]="emailForm" (ngSubmit)="requestCode()"><label for="email">Correo electrónico</label><input id="email" type="email" formControlName="email" autocomplete="email" placeholder="tu.correo@ejemplo.com" [attr.aria-invalid]="emailForm.controls.email.touched && emailForm.controls.email.invalid" aria-describedby="email-error">@if(emailForm.controls.email.touched && emailForm.invalid){<p id="email-error" class="error">Ingresa un correo electrónico válido.</p>}<button class="button full" type="submit">Enviar código <span>→</span></button></form>}
-@else {<p class="muted">En producción enviaremos un código a <strong>{{service.email()}}</strong>. En esta demo usa 123456.</p><form [formGroup]="otpForm" (ngSubmit)="verify()"><label for="otp">Código de verificación</label><input id="otp" class="otp" formControlName="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" aria-describedby="otp-error"><p id="otp-error" class="error" role="alert">{{error()}}</p><button class="button full" type="submit">Ver mis certificados <span>→</span></button></form><div class="otp-actions"><button class="text-button" (click)="resend()">Volver a enviar código</button><button class="text-button" (click)="changeEmail()">Cambiar correo</button></div>}
-<p role="status" class="muted">{{message()}}</p><div class="privacy">⌑ Tu correo se usará para identificar tus certificados.</div></div></div>
-} @else {
-<div class="account"><span class="avatar">{{service.email().slice(0,1).toUpperCase()}}</span><div><strong>Tu recorrido en UCTS</strong><p>{{service.email()}}</p></div><span class="session">● Sesión de demostración</span></div><div class="list-heading"><div><h2>Experiencias que dejan huella</h2><p class="muted">{{service.events.length}} eventos · {{availableCount}} certificados disponibles</p></div><div class="filter"><label for="category">Tipo de evento</label><select id="category" [value]="category()" (change)="setCategory($event)"><option value="Todos">Todos los eventos</option>@for(type of categories; track type){<option [value]="type">{{type}}</option>}</select></div></div><div class="event-grid">@for(event of filteredEvents(); track event.id){<article class="event-card"><div class="event-top"><span class="event-icon" aria-hidden="true">{{event.category === 'Taller' ? '✳' : '↗'}}</span><span class="badge" [class.pending]="!event.available">{{event.available ? 'Disponible' : 'En proceso'}}</span></div><span class="eyebrow">{{event.category}}</span><h3>{{event.title}}</h3><p class="event-date">{{event.date}} <span>·</span> {{event.hours}} horas</p><div class="event-bottom"><span>{{event.available ? 'Certificado de participación' : 'Pendiente de validación'}}</span><button class="button" [disabled]="!event.available" (click)="download(event)">{{event.available ? 'Descargar PDF ↓' : 'Próximamente'}}</button></div></article>}</div><p class="muted" role="status">{{message()}}</p><p class="help">¿No encuentras un evento? Verifica que ingresaste con el correo utilizado en tu inscripción.</p>
-}</section>` })
+import { AuthService, Profile } from '../core/auth.service';
+import { Certificate, CertificateService } from '../core/certificate.service';
+
+@Component({
+  selector: 'app-certificates',
+  imports: [ReactiveFormsModule],
+  styleUrl: './certificates.scss',
+  templateUrl: './certificates.html',
+})
 export class Certificates {
- readonly service = inject(CertificateService);
- readonly step = signal<'email'|'otp'>('email'); readonly error = signal(''); readonly message = signal(''); readonly category = signal('Todos');
- readonly emailForm = new FormGroup({email: new FormControl('', { nonNullable:true, validators:[Validators.required, Validators.email, Validators.maxLength(254)] })});
- readonly otpForm = new FormGroup({code: new FormControl('', { nonNullable:true, validators:[Validators.required, Validators.pattern(/^\d{6}$/)] })});
- readonly categories = [...new Set(this.service.events.map(event => event.category))];
- readonly availableCount = this.service.events.filter(event => event.available).length;
- readonly filteredEvents = computed(() => this.service.events.filter(event => this.category() === 'Todos' || event.category === this.category()));
- requestCode(){this.emailForm.markAllAsTouched(); if(this.emailForm.invalid)return; this.service.requestCode(this.emailForm.controls.email.value.trim().toLowerCase()); this.step.set('otp'); this.message.set('Código de demostración preparado: 123456.'); this.focus('otp');}
- verify(){this.error.set(''); if(this.otpForm.invalid){this.error.set('Escribe los 6 dígitos del código.');return;} if(!this.service.verifyCode(this.otpForm.controls.code.value)){this.error.set('El código no es correcto. En esta demo utiliza 123456.');return;}this.message.set(''); this.focus('category');}
- resend(){this.otpForm.reset();this.error.set('');this.message.set('Código de demostración preparado nuevamente: 123456.');this.focus('otp');}
- changeEmail(){this.step.set('email');this.otpForm.reset();this.error.set('');this.message.set('');this.focus('email');}
- logout(){this.service.signOut();this.category.set('Todos');this.changeEmail();}
- setCategory(event:Event){this.category.set((event.target as HTMLSelectElement).value);}
- download(event:UctsEvent){try{this.service.download(event);this.message.set('Se inició la descarga del PDF de demostración. No tiene validez oficial.');}catch{this.message.set('No fue posible descargar el certificado. Intenta nuevamente.');}}
- private focus(id:string){setTimeout(()=>document.getElementById(id)?.focus());}
+  private readonly auth = inject(AuthService);
+  private readonly certificates = inject(CertificateService);
+  private readonly document = inject(DOCUMENT);
+  private readonly destroy = inject(DestroyRef);
+  private challengeId = '';
+  private email = '';
+  private timer?: ReturnType<typeof setTimeout>;
+
+  readonly profile = signal<Profile | null>(null);
+  readonly items = signal<Certificate[] | null>(null);
+  readonly step = signal<'email' | 'otp'>('email');
+  readonly busy = signal(true);
+  readonly resendBlocked = signal(false);
+  readonly error = signal('');
+  readonly message = signal('');
+  readonly emailForm = new FormGroup({
+    email: new FormControl('', {
+      nonNullable: true,
+      validators: [Validators.required, Validators.email, Validators.maxLength(254)],
+    }),
+  });
+  readonly otpForm = new FormGroup({
+    code: new FormControl('', {
+      nonNullable: true,
+      validators: [Validators.required, Validators.pattern(/^[0-9]{6,8}$/)],
+    }),
+  });
+
+  constructor() {
+    afterNextRender(() => void this.restoreSession());
+    this.destroy.onDestroy(() => clearTimeout(this.timer));
+  }
+
+  async restoreSession() {
+    try {
+      const profile = await this.auth.profile();
+      this.profile.set(profile);
+      await this.loadCertificates();
+    } catch (error) {
+      if (!(error instanceof HttpErrorResponse && error.status === 401)) {
+        this.error.set('No fue posible consultar la sesión. Intenta nuevamente.');
+      }
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  async requestCode() {
+    this.emailForm.markAllAsTouched();
+    if (this.emailForm.invalid || this.busy()) return;
+    await this.sendCode(this.emailForm.controls.email.value.trim());
+  }
+
+  async resend() {
+    if (this.busy() || this.resendBlocked()) return;
+    await this.sendCode(this.email);
+  }
+
+  private async sendCode(email: string) {
+    this.busy.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const challenge = await this.auth.requestCode(email);
+      this.email = email;
+      this.challengeId = challenge.challengeId;
+      this.otpForm.reset();
+      this.step.set('otp');
+      this.message.set(challenge.message);
+      this.delayResend(challenge.resendAfter);
+      this.focus('otp');
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 429) {
+        const wait = Number(error.headers.get('Retry-After'));
+        this.delayResend(wait > 0 ? wait : 60);
+        this.error.set('Demasiados intentos. Espera antes de solicitar otro código.');
+      } else {
+        this.error.set('No fue posible solicitar el código. Intenta nuevamente.');
+      }
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  private delayResend(seconds: number) {
+    clearTimeout(this.timer);
+    this.resendBlocked.set(true);
+    this.timer = setTimeout(() => this.resendBlocked.set(false), seconds * 1000);
+  }
+
+  async verify() {
+    this.otpForm.markAllAsTouched();
+    if (this.otpForm.invalid || this.busy() || !this.challengeId) return;
+    this.busy.set(true);
+    this.error.set('');
+    try {
+      await this.auth.verifyCode(this.challengeId, this.otpForm.controls.code.value);
+      this.resetChallenge();
+      await this.restoreSession();
+      this.focus(this.profile() ? 'certificates-heading' : 'email');
+    } catch (error) {
+      this.error.set(
+        error instanceof HttpErrorResponse && error.status === 401
+          ? 'Código inválido o vencido. Revisa el código o solicita uno nuevo.'
+          : 'No fue posible verificar el código. Intenta nuevamente.',
+      );
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  changeEmail() {
+    this.resetChallenge();
+    this.error.set('');
+    this.focus('email');
+  }
+
+  async logout() {
+    if (this.busy()) return;
+    this.busy.set(true);
+    this.error.set('');
+    try {
+      await this.auth.logout();
+      this.profile.set(null);
+      this.items.set(null);
+      this.emailForm.reset();
+      this.changeEmail();
+    } catch {
+      this.error.set('No fue posible cerrar la sesión. Intenta nuevamente.');
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  async loadCertificates() {
+    this.error.set('');
+    try {
+      this.items.set(await this.certificates.list());
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 401) {
+        this.profile.set(null);
+        this.items.set(null);
+        this.error.set('Tu sesión venció. Ingresa nuevamente.');
+      } else {
+        this.error.set('No fue posible consultar tus certificados.');
+      }
+    }
+  }
+
+  download(id: string) {
+    return this.certificates.download(id);
+  }
+
+  private resetChallenge() {
+    clearTimeout(this.timer);
+    this.resendBlocked.set(false);
+    this.step.set('email');
+    this.challengeId = '';
+    this.email = '';
+    this.otpForm.reset();
+    this.message.set('');
+  }
+
+  private focus(id: string) {
+    setTimeout(() => this.document.getElementById(id)?.focus());
+  }
 }

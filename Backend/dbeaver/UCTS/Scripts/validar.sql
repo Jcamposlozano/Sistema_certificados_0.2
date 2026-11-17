@@ -5,8 +5,12 @@ FROM information_schema.tables
 WHERE table_schema = 'public'
 ORDER BY table_name;
 
-SELECT p.email, e.title, e.date, e.hours, a.available
-FROM attendances a
-JOIN participants p ON p.id = a.participant_id
-JOIN events e ON e.id = a.event_id
-ORDER BY e.date DESC;
+SELECT status, count(*)
+FROM certificates
+GROUP BY status
+ORDER BY status;
+
+SELECT sheet, count(*)
+FROM certificate_sources
+GROUP BY sheet
+ORDER BY sheet;

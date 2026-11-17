@@ -1,0 +1,68 @@
+name: ucts-beta
+
+services:
+  backend:
+    image: ucts-beta-backend:local
+    build:
+      context: ./Backend
+      additional_contexts:
+        generator: ${BETA_CERTIFICATE_SERVICE_DIR:-../certificate-service}/app
+    user: "${BETA_UID:-1000}:${BETA_GID:-1000}"
+    init: true
+    env_file:
+      - ${BETA_BACKEND_ENV_FILE:-./Backend/.env}
+    environment:
+      APP_ENV: local
+      AUTH_MODE: cognito
+      COOKIE_SECURE: "false"
+      ALLOWED_ORIGINS: >-
+        ["http://127.0.0.1:8000","http://localhost:8000",
+        "http://127.0.0.1:4200","http://localhost:4200"]
+      ALLOWED_HOSTS: '["127.0.0.1","localhost","backend"]'
+      CERTIFICATE_CATALOG_SQLITE: /catalog/ucts_certificados.sqlite
+      DATABASE_URL: sqlite:////state/ucts_auth.sqlite
+      CERTIFICATE_GENERATOR_ENABLED: "true"
+      TEMPLATE_STORAGE: local
+      LOCAL_TEMPLATES_DIR: /templates
+      AWS_PROFILE: ${BETA_AWS_PROFILE:-ucts-cert-lab}
+      AWS_CONFIG_FILE: /aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+      AWS_EC2_METADATA_DISABLED: "true"
+    volumes:
+      - type: bind
+        source: ${BETA_DATA_DIR:-./Backend/data}
+        target: /state
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BETA_DATA_DIR:-./Backend/data}/ucts_certificados.sqlite
+        target: /catalog/ucts_certificados.sqlite
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BETA_CERTIFICATE_SERVICE_DIR:-../certificate-service}/templates
+        target: /templates
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BETA_AWS_DIR:-${HOME}/.aws}
+        target: /aws
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready', timeout=3).close()"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+
+  frontend:
+    image: ucts-beta-frontend:local
+    build: ./Fronted/ucts-zone
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8080"

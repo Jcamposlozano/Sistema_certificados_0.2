@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -31,8 +32,17 @@ class EventResponse(BaseModel):
     id: str
     title: str
     category: str
-    date: str
-    hours: int
+    date: str | None
+    hours: int | None
+    available: bool
+
+
+class CertificateResponse(BaseModel):
+    id: str
+    eventId: str
+    title: str
+    category: str
+    role: str
     available: bool
 
 
@@ -116,9 +126,9 @@ def events(request: Request, participant: Current):
             id=event.id,
             title=event.title,
             category=event.category,
-            date=event.date.isoformat(),
+            date=event.date.isoformat() if event.date else None,
             hours=event.hours,
-            available=event.available,
+            available=event.available and request.app.state.settings.auth_mode == "local",
         )
         for event in request.app.state.certificates.events(participant)
     ]
@@ -131,8 +141,38 @@ def certificate(event_id: str, request: Request, participant: Current):
     if len(event_id) > 36:
         raise AppError(ErrorKind.NOT_FOUND, "Evento no encontrado.")
     data = request.app.state.certificates.download(participant, event_id)
+    return pdf_response(data)
+
+
+def pdf_response(data: bytes, filename: str = "certificado-ucts.pdf") -> Response:
     return Response(
         content=data,
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="certificado-ucts.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/me/certificates", response_model=list[CertificateResponse])
+def certificates(request: Request, participant: Current):
+    service = request.app.state.certificates
+    return [
+        CertificateResponse(
+            id=certificate.id,
+            eventId=certificate.event_id,
+            title=certificate.title,
+            category=certificate.category,
+            role=certificate.role,
+            available=service.certificate_available(certificate),
+        )
+        for certificate in service.certificates(participant)
+    ]
+
+
+@router.get(
+    "/me/certificates/{certificate_id}", responses={200: {"content": {"application/pdf": {}}}}
+)
+def download_certificate(certificate_id: UUID, request: Request, participant: Current):
+    return pdf_response(
+        request.app.state.certificates.download_certificate(participant, str(certificate_id)),
+        filename=f"certificado-{certificate_id}.pdf",
     )

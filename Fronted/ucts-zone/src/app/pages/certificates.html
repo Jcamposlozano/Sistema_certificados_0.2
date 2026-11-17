@@ -1,0 +1,117 @@
+<section class="wrap certificates">
+  <div class="page-heading">
+    <div>
+      <h1>Mis certificados<span>.</span></h1>
+      <p class="muted">Consulta tus participaciones en UCTS.</p>
+    </div>
+    @if (profile()) {
+      <button class="button secondary" type="button" [disabled]="busy()" (click)="logout()">
+        Cerrar sesión
+      </button>
+    }
+  </div>
+
+  @if (profile(); as participant) {
+    <div class="account">
+      <div>
+        <strong>{{ participant.name }}</strong>
+        <p>{{ participant.email }}</p>
+      </div>
+    </div>
+
+    <div class="list-heading">
+      <h2 id="certificates-heading" tabindex="-1">Mis participaciones</h2>
+    </div>
+    <p class="error" role="alert">{{ error() }}</p>
+    @if (items(); as certificates) {
+      <div class="event-grid">
+        @for (certificate of certificates; track certificate.id) {
+          <article class="event-card">
+            <h3>{{ certificate.title }}</h3>
+            <p>{{ certificate.role }}</p>
+            @if (certificate.available) {
+              <a class="button" [href]="download(certificate.id)">Descargar PDF</a>
+            } @else {
+              <span class="badge pending">Certificado pendiente</span>
+            }
+          </article>
+        } @empty {
+          <p class="muted">Todavía no hay certificados asociados a tu cuenta.</p>
+        }
+      </div>
+    } @else if (error()) {
+      <button class="button secondary" type="button" (click)="loadCertificates()">
+        Reintentar
+      </button>
+    }
+  } @else {
+    <div class="access-layout">
+      <aside>
+        <h2>Accede con tu correo principal</h2>
+        <p class="muted">
+          Usa el correo principal registrado en UCTS para recibir un código de acceso.
+        </p>
+      </aside>
+      <div class="access-card">
+        @if (step() === 'email') {
+          <h2>Solicita un código</h2>
+          <form [formGroup]="emailForm" (ngSubmit)="requestCode()">
+            <label for="email">Correo electrónico</label>
+            <input
+              id="email"
+              type="email"
+              formControlName="email"
+              autocomplete="email"
+              [attr.aria-invalid]="emailForm.controls.email.touched && emailForm.invalid"
+              aria-describedby="email-validation"
+            />
+            <p id="email-validation" class="error">
+              @if (emailForm.controls.email.touched && emailForm.invalid) {
+                Ingresa un correo electrónico válido.
+              }
+            </p>
+            <button class="button full" type="submit" [disabled]="busy()">Enviar código</button>
+          </form>
+        } @else {
+          <h2>Revisa tu correo</h2>
+          <p role="status" class="muted">{{ message() }}</p>
+          <form [formGroup]="otpForm" (ngSubmit)="verify()">
+            <label for="otp">Código de verificación</label>
+            <input
+              id="otp"
+              class="otp"
+              formControlName="code"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="8"
+              [attr.aria-invalid]="otpForm.controls.code.touched && otpForm.invalid"
+              aria-describedby="otp-validation"
+            />
+            <p id="otp-validation" class="error">
+              @if (otpForm.controls.code.touched && otpForm.invalid) {
+                Escribe el código numérico que recibiste.
+              }
+            </p>
+            <button class="button full" type="submit" [disabled]="busy()">
+              Ver mis certificados
+            </button>
+          </form>
+          <div class="otp-actions">
+            <button
+              class="text-button"
+              type="button"
+              [disabled]="busy() || resendBlocked()"
+              (click)="resend()"
+            >
+              Reenviar código
+            </button>
+            <button class="text-button" type="button" [disabled]="busy()" (click)="changeEmail()">
+              Cambiar correo
+            </button>
+          </div>
+        }
+        <p class="error" role="alert">{{ error() }}</p>
+      </div>
+    </div>
+  }
+</section>

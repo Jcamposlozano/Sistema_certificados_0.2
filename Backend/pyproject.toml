@@ -11,8 +11,11 @@ dependencies = [
   "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1",
   "sqlalchemy>=2.0,<3", "psycopg[binary]>=3.2,<4",
   "alembic>=1.14,<2", "pydantic-settings>=2.7,<3", "email-validator>=2.2,<3",
-  "boto3>=1.38,<2", "reportlab>=4.3,<5"
+  "boto3>=1.38,<2", "reportlab>=4.3,<5", "openpyxl>=3.1.5,<4"
 ]
+
+[project.optional-dependencies]
+generator = ["jinja2 (>=3.1.6,<4)", "weasyprint (>=68.1,<69)"]
 [tool.poetry]
 packages = [{ include = "ucts", from = "src" }]
 

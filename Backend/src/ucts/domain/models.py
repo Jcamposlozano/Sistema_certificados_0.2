@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
@@ -14,9 +16,30 @@ class Event:
     id: str
     title: str
     category: str
-    date: date
-    hours: int
+    date: date | None
+    hours: int | None
     available: bool
+
+
+@dataclass(frozen=True)
+class CertificateGeneration:
+    template_id: str
+    name: str
+    identification: str
+
+
+@dataclass(frozen=True)
+class Certificate:
+    id: str
+    event_id: str
+    title: str
+    category: str
+    role: str
+    status: str
+    s3_bucket: str | None
+    s3_key: str | None
+    s3_version_id: str | None
+    generation: CertificateGeneration | None = None
 
 
 @dataclass

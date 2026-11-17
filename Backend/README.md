@@ -2,20 +2,27 @@
 
 API REST con FastAPI, Python 3.12+, arquitectura hexagonal, PostgreSQL y autenticación OTP por correo mediante Amazon Cognito. Poetry administra todas las dependencias; no usar pip ni requirements.txt para este proyecto.
 
-## Inicio local
+## Acceso con correo principal y Cognito
+
+Sigue la [guía de Cognito y SES](docs/cognito.md) para conectar Angular con FastAPI
+y autorizar el acceso desde `correos_con_principal` del catálogo SQLite importado.
+El catálogo se abre en solo lectura. El estado de autenticación se inicializa en
+un archivo SQLite separado para el piloto.
+
+## Inicio local con el catálogo PostgreSQL
 
 Requisitos: Poetry 2, Python 3.12+ y Docker con Compose.
 
 Desde `Backend`:
 
 ```sh
-poetry env use /opt/homebrew/bin/python3.12
+poetry env use python3
 poetry install
 cp .env.example .env
 # Ajusta .env si ya tienes uno. Nunca sobrescribas credenciales propias.
 docker compose up -d db
 poetry run alembic upgrade head
-poetry run ucts seed
+poetry run ucts import-certificates
 poetry run uvicorn ucts.main:create_app --factory --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -26,9 +33,9 @@ poetry run uvicorn ucts.main:create_app --factory --reload --host 127.0.0.1 --po
 - Estado: `/health/live` y `/health/ready`
 - PostgreSQL local: `localhost:5433/ucts_zone`
 
-La configuración de ejemplo habilita **AUTH_MODE=local**. El OTP es aleatorio, vence a los 180 segundos y se muestra únicamente en la terminal de la API. No se envían correos en modo local. El usuario de ejemplo es `demo@ucts.local`. El PDF local tiene una marca de demostración.
+La configuración de ejemplo habilita **AUTH_MODE=local**. El OTP es aleatorio, vence a los 180 segundos y se muestra únicamente en la terminal de la API. No se envían correos en modo local. Para probar con datos ficticios, ejecuta `poetry run ucts seed` y usa `demo@example.com`. El PDF de ejemplo tiene una marca de demostración.
 
-El frontend continúa en su modo demo independiente; su conexión HTTP con esta API queda para el siguiente paso. Los endpoints corresponden al contrato planteado, con fechas ISO `YYYY-MM-DD`. No se usa el código fijo 123456 en este backend.
+El frontend llama a esta API mediante el proxy de desarrollo de Angular.
 
 ## Arquitectura
 
@@ -40,36 +47,38 @@ src/ucts/
     services.py           Casos de uso OTP, sesión, eventos y descarga
   adapters/
     http/                 Rutas y validaciones FastAPI
-    persistence/          SQLAlchemy + psycopg; PostgreSQL
+    persistence/          Estado SQLAlchemy y catálogo SQLite de solo lectura
     identity/             Adaptadores Cognito y local
-    documents/            Generación PDF con ReportLab
+    documents/            Descarga privada S3 y PDF de demostración
   config.py               Configuración validada desde variables de entorno
   main.py                 Composición e inyección de adaptadores
-  cli.py                  Seed local y limpieza de registros vencidos
+  cli.py                  Alta Cognito, inicialización de sesiones y administración de datos
 migrations/               Historial de esquema Alembic
 ```
 
-La aplicación utiliza puertos; los adaptadores dependen de esos contratos y del dominio. Ninguna regla de autenticación o habilitación depende de FastAPI. Cambiar PostgreSQL, Cognito o el generador PDF requiere sustituir un adaptador.
+La aplicación utiliza puertos; los adaptadores dependen de esos contratos y del dominio. Ninguna regla de autenticación o habilitación depende de FastAPI. PostgreSQL, Cognito y S3 se integran mediante adaptadores.
 
 ## Endpoints
 
 | Método | Ruta | Comportamiento |
 | --- | --- | --- |
-| POST | `/api/auth/otp/request` | `{ "email": "demo@ucts.local" }` → `challengeId`, `expiresIn`, `resendAfter` y mensaje genérico. |
+| POST | `/api/auth/otp/request` | `{ "email": "demo@example.com" }` → `challengeId`, `expiresIn`, `resendAfter` y mensaje genérico. |
 | POST | `/api/auth/otp/verify` | `{ "challengeId": "...", "code": "..." }` → 204 y cookie de sesión HttpOnly. |
 | POST | `/api/auth/logout` | Revoca la sesión en servidor y elimina la cookie. |
 | GET | `/api/me` | Perfil de la sesión activa. |
 | GET | `/api/me/events` | Solo las participaciones del usuario autenticado. |
-| GET | `/api/me/events/{id}/certificate` | PDF como archivo adjunto si el certificado está habilitado. |
+| GET | `/api/me/events/{id}/certificate` | PDF de demostración habilitado en modo local. |
+| GET | `/api/me/certificates` | Catálogo de certificados del titular, con su disponibilidad. |
+| GET | `/api/me/certificates/{id}` | Descarga del PDF publicado en S3. |
 
-Todas las peticiones POST requieren `Origin` de la lista `ALLOWED_ORIGINS`, incluso desde curl/Insomnia. Swagger funciona entrando desde un origen permitido (`http://localhost:8000`). Angular usará `withCredentials: true`. CORS no usa comodines. Localmente usar `localhost` tanto en Angular como en la API; no mezclar con `127.0.0.1` por las cookies.
+Todas las peticiones POST requieren `Origin` de la lista `ALLOWED_ORIGINS`, incluso desde curl/Insomnia. Swagger funciona entrando desde un origen permitido (`http://localhost:8000`). Angular usa rutas relativas bajo el mismo origen visible al navegador. Localmente abre el portal en `http://localhost:4200`.
 
 Ejemplo de petición local:
 
 ```sh
 curl -X POST http://localhost:8000/api/auth/otp/request \
   -H 'Origin: http://localhost:4200' -H 'Content-Type: application/json' \
-  -d '{"email":"demo@ucts.local"}'
+  -d '{"email":"demo@example.com"}'
 ```
 
 Errores: 401 sin sesión o OTP inválido/vencido; 403 origen o certificado no permitido; 404 evento ajeno/inexistente; 422 formato inválido; 429 límite de solicitudes; 503 dependencia no disponible. La API no revela si un evento existe para otra persona.
@@ -78,7 +87,7 @@ Errores: 401 sin sesión o OTP inválido/vencido; 403 origen o certificado no pe
 
 Ver [guía de conexión](docs/dbeaver.md). La base y las tablas las crean PostgreSQL y Alembic; DBeaver permite consultarlas y administrarlas. Incluimos un proyecto de conexión importable en `dbeaver/UCTS` sin contraseña guardada.
 
-Entidades: `participants` (correo único, identidad Cognito `sub`), `events`, `attendances` (participación y habilitación), `otp_challenges`, `auth_sessions`, `rate_limits`. Horas positivas, claves foráneas y participación única por persona/evento. Los timestamps de autenticación son segundos Unix UTC.
+El [catálogo de certificados](docs/certificate-catalog.md) describe el modelo relacional, la carga desde Excel, las incidencias del archivo y cómo vincular PDFs en S3.
 
 Migraciones nuevas:
 
@@ -91,29 +100,16 @@ poetry run alembic check
 
 No se ejecuta `create_all` al iniciar la API. El seed es explícito, idempotente y está bloqueado fuera del modo local.
 
-## Cognito real
-
-Ver [configuración de AWS](docs/cognito.md). Para activar el conector:
-
-```dotenv
-AUTH_MODE=cognito
-AWS_REGION=us-east-1
-COGNITO_CLIENT_ID=tu_app_client_id
-COGNITO_CLIENT_SECRET=solo_si_existe
-```
-
-En producción usar `APP_ENV=production`, `COOKIE_SECURE=true`, orígenes HTTPS explícitos y un `OTP_SECRET` aleatorio. No guardar secretos en Git. La configuración rechaza el adaptador local en producción.
-
 ## Controles implementados
 
 - OTP local guardado como HMAC con salt; jamás se devuelve en respuestas HTTP.
 - Cognito administra y envía el OTP real con `USER_AUTH` / `EMAIL_OTP`.
-- Desafío opaco, con caducidad, máximo cinco intentos y consumo único bajo bloqueo de fila.
-- Reenvío invalida desafíos anteriores. Límites compartidos en PostgreSQL: un envío por correo cada 60 s, 10 por hora y 20 por IP cada 15 min.
+- Desafío opaco, con caducidad, máximo cinco intentos y consumo único con bloqueo de fila en PostgreSQL y transacción inmediata en el piloto SQLite.
+- Reenvío invalida desafíos anteriores. Límites persistentes: un envío por correo cada 60 s, 10 por hora y 20 por IP cada 15 min.
 - Sesión opaca de una hora guardada como hash, revocable mediante logout; no se exponen tokens AWS al navegador.
 - Identidad real validada por Cognito con `get_user`; se exige correo verificado y se vincula el `sub` al registro de participante.
 - Cookie HttpOnly y SameSite=Lax, Secure en producción, validación de Origin para POST, hosts permitidos y respuestas privadas sin caché.
-- Consulta de participación y habilitación en servidor antes de generar PDF.
+- El OTP requiere un correo principal único en el catálogo SQLite o un participante habilitado en PostgreSQL. La API verifica titular y publicación antes de descargar cada PDF.
 
 Para producción: desplegar frontend y API bajo el mismo sitio (preferiblemente `/api` por proxy), TLS, base de datos privada y secretos administrados. Si hay proxy inverso, configurar Uvicorn para confiar en las cabeceras de IP únicamente de ese proxy; no confiar en IPs reenviadas por clientes arbitrarios. Limitar tamaño/tasa de solicitudes también en el proxy. La sesión de esta API es independiente tras el login: un cierre global en Cognito no revoca automáticamente estas sesiones; logout de esta API sí las revoca.
 
@@ -123,7 +119,7 @@ Programar la limpieza de registros temporales:
 poetry run ucts cleanup
 ```
 
-No se incluye todavía administración de eventos/participantes, carga masiva, alta de usuarios Cognito, revocación administrativa global ni diseño institucional definitivo de certificados.
+La carga masiva y la vinculación de PDFs se operan mediante la CLI. El alta en Cognito y la conexión de Angular son pasos separados.
 
 ## Pruebas
 

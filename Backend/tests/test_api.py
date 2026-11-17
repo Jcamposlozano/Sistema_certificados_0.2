@@ -5,7 +5,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ucts.adapters.persistence.models import ChallengeRow, RateRow, SessionRow
+from ucts.adapters.persistence.models import (
+    ChallengeRow,
+    ParticipantRow,
+    RateRow,
+    SessionRow,
+)
 from ucts.application.services import token_hash
 
 from .conftest import ORIGIN, login, request_code
@@ -80,7 +85,11 @@ def test_expired_otp_and_session(client, caplog, engine):
         ).status_code
         == 401
     )
-    login(client, caplog, email="another@example.com")
+    with Session(engine) as db:
+        for row in db.scalars(select(RateRow)):
+            row.expires_at = int(time.time()) - 1
+        db.commit()
+    login(client, caplog)
     with Session(engine) as db:
         row = db.scalar(select(SessionRow))
         row.expires_at = int(time.time()) - 1
@@ -139,10 +148,34 @@ def test_origin_and_validation(client):
     assert client.get("/api/me", headers={"Host": "evil.example"}).status_code == 400
 
 
-def test_empty_account_sees_no_other_events(client, seeded, caplog):
-    login(client, caplog, email="new@example.com")
-    assert client.get("/api/me/events").json() == []
-    assert client.get("/api/me/events/available/certificate").status_code == 404
+def test_unlisted_email_never_gets_a_challenge(client, engine, caplog):
+    response = client.post(
+        "/api/auth/otp/request", json={"email": "new@example.com"}, headers=ORIGIN
+    )
+    assert response.status_code == 200
+    assert "OTP para" not in caplog.text
+    assert (
+        client.post(
+            "/api/auth/otp/verify",
+            headers=ORIGIN,
+            json={"challengeId": response.json()["challengeId"], "code": "123456"},
+        ).status_code
+        == 401
+    )
+    with Session(engine) as db:
+        assert db.scalar(select(ChallengeRow)) is None
+        assert (
+            db.scalar(select(ParticipantRow).where(ParticipantRow.email == "new@example.com"))
+            is None
+        )
+
+
+def test_disabled_participant_loses_session(client, engine, seeded, caplog):
+    login(client, caplog)
+    with Session(engine) as db:
+        db.get(ParticipantRow, seeded).enabled = False
+        db.commit()
+    assert client.get("/api/me").status_code == 401
 
 
 def test_health_and_cors(client):

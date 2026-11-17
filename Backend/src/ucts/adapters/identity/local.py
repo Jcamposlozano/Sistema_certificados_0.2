@@ -17,7 +17,7 @@ class LocalIdentityProvider:
     def _digest(self, email: str, salt: str, code: str) -> str:
         return hmac.new(self.secret, f"{email}:{salt}:{code}".encode(), "sha256").hexdigest()
 
-    def request(self, email: str) -> str:
+    def request(self, email: str, participant_id: str, expected_subject: str | None = None) -> str:
         code = f"{secrets.randbelow(1_000_000):06d}"
         salt = secrets.token_hex(16)
         # Explicitly local: do not configure this logger in deployed environments.

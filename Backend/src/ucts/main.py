@@ -12,27 +12,63 @@ from sqlalchemy.orm import sessionmaker
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from ucts.adapters.documents.certificate_service import CertificateServiceGenerator
 from ucts.adapters.documents.pdf import PdfCertificateRenderer
+from ucts.adapters.documents.s3 import S3CertificateStore
 from ucts.adapters.http.api import router
-from ucts.adapters.identity.cognito import CognitoIdentityProvider
+from ucts.adapters.identity.cognito import CognitoIdentityProvider, CognitoUserPool
 from ucts.adapters.identity.local import LocalIdentityProvider
 from ucts.adapters.persistence.repository import SqlUnitOfWork
+from ucts.adapters.persistence.sqlite_catalog import (
+    SqliteCatalogRepository,
+    catalog_path,
+    enable_sqlite_foreign_keys,
+)
 from ucts.application.services import AuthService, CertificateService
 from ucts.config import Settings
 from ucts.domain.models import AppError, ErrorKind
 
 
-def create_app(settings: Settings | None = None, *, engine=None, provider=None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    engine=None,
+    provider=None,
+    certificate_store=None,
+    certificate_generator=None,
+) -> FastAPI:
     settings = settings or Settings()
+    catalog = None
+    if settings.certificate_catalog_sqlite:
+        catalog = catalog_path(settings.database_url, settings.certificate_catalog_sqlite)
     engine = (
-        engine if engine is not None else create_engine(settings.database_url, pool_pre_ping=True)
+        engine
+        if engine is not None
+        else create_engine(settings.database_url, pool_pre_ping=True, hide_parameters=True)
     )
     factory = sessionmaker(engine, expire_on_commit=False)
-    uow = partial(SqlUnitOfWork, factory)
+    if catalog:
+        if engine.dialect.name == "sqlite":
+            enable_sqlite_foreign_keys(engine)
+        uow = partial(SqlUnitOfWork, factory, partial(SqliteCatalogRepository, catalog=catalog))
+    else:
+        uow = partial(SqlUnitOfWork, factory)
     if provider is None:
         if settings.auth_mode == "local":
             provider = LocalIdentityProvider(settings.otp_secret)
         else:
+            user_pool = None
+            if catalog and settings.cognito_user_pool_id:
+                user_pool = CognitoUserPool(
+                    boto3.client(
+                        "cognito-idp",
+                        region_name=settings.aws_region,
+                        config=Config(
+                            connect_timeout=5, read_timeout=10, retries={"max_attempts": 0}
+                        ),
+                    ),
+                    settings.cognito_user_pool_id,
+                )
             provider = CognitoIdentityProvider(
                 boto3.client(
                     "cognito-idp",
@@ -46,7 +82,24 @@ def create_app(settings: Settings | None = None, *, engine=None, provider=None) 
                 ),
                 settings.cognito_client_id,
                 settings.cognito_client_secret,
+                use_participant_id=catalog is not None and user_pool is None,
+                user_pool=user_pool,
             )
+
+    if not catalog and certificate_store is None and settings.certificate_s3_bucket:
+        certificate_store = S3CertificateStore(
+            boto3.client(
+                "s3",
+                region_name=settings.aws_region,
+                config=Config(connect_timeout=5, read_timeout=15),
+            ),
+            settings.certificate_s3_bucket,
+        )
+
+    if certificate_generator is None and settings.certificate_generator_enabled:
+        from app.api.routes import certificate_service
+
+        certificate_generator = CertificateServiceGenerator(certificate_service, "ucts")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -62,9 +115,13 @@ def create_app(settings: Settings | None = None, *, engine=None, provider=None) 
         settings.otp_ttl_seconds,
         settings.otp_resend_seconds,
         settings.session_ttl_seconds,
+        persist_subject=settings.auth_mode == "cognito",
     )
     app.state.certificates = CertificateService(
-        uow, PdfCertificateRenderer(local=settings.auth_mode == "local")
+        uow,
+        PdfCertificateRenderer(local=True) if settings.auth_mode == "local" else None,
+        certificate_store,
+        certificate_generator,
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     app.add_middleware(
@@ -105,8 +162,14 @@ def create_app(settings: Settings | None = None, *, engine=None, provider=None) 
 
     @app.get("/health/ready", tags=["health"])
     def ready():
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
+        if catalog:
+            with uow() as work:
+                work.repo.check_catalog()
+                work.repo.db.execute(text("SELECT count(*) FROM auth_sessions WHERE 1 = 0"))
+                work.repo.db.execute(text("SELECT count(*) FROM certificate_downloads WHERE 1 = 0"))
+        else:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
         return {"status": "ok"}
 
     app.include_router(router)

@@ -1,0 +1,10 @@
+*
+!pyproject.toml
+!poetry.lock
+!src/
+!src/**
+!Dockerfile
+!docker-entrypoint.sh
+**/__pycache__/
+**/*.pyc
+**/.DS_Store

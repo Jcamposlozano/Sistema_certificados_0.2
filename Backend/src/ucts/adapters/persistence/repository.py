@@ -1,22 +1,35 @@
 import time
 from dataclasses import asdict
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import sessionmaker
 
 from ucts.adapters.persistence.models import (
     AttendanceRow,
+    CertificateDownloadRow,
+    CertificateRow,
     ChallengeRow,
     EventRow,
     ParticipantRow,
     RateRow,
     SessionRow,
 )
-from ucts.domain.models import AppError, Challenge, ErrorKind, Event, Identity, Participant, Session
+from ucts.domain.models import (
+    AppError,
+    Certificate,
+    Challenge,
+    ErrorKind,
+    Event,
+    Identity,
+    Participant,
+    Session,
+)
 
 
 class SqlRepository:
@@ -74,25 +87,57 @@ class SqlRepository:
     def _participant(row: ParticipantRow) -> Participant:
         return Participant(row.id, row.name, row.email, row.subject)
 
+    @staticmethod
+    def _enabled_participants():
+        return select(ParticipantRow).where(
+            ParticipantRow.enabled.is_(True),
+            exists().where(AttendanceRow.participant_id == ParticipantRow.id),
+        )
+
     def participant(self, participant_id: str) -> Participant | None:
-        row = self.db.get(ParticipantRow, participant_id)
+        row = self.db.scalar(
+            self._enabled_participants().where(ParticipantRow.id == participant_id)
+        )
         return self._participant(row) if row else None
 
-    def bind_identity(self, identity: Identity) -> Participant:
-        # Email must be verified by the identity provider before associating an imported record.
+    def bound_subject(self, participant_id: str) -> str | None:
+        row = self.db.get(ParticipantRow, participant_id)
+        if row and row.subject and not row.subject.startswith("local:"):
+            return row.subject
+        return None
+
+    def auth_target(self, email: str) -> str | None:
+        row = self.db.scalar(self._enabled_participants().where(ParticipantRow.email == email))
+        return row.id if row else None
+
+    def bind_identity(
+        self, identity: Identity, participant_id: str, *, persist_subject: bool
+    ) -> Participant:
         row = self.db.scalar(
-            select(ParticipantRow).where(ParticipantRow.email == identity.email).with_for_update()
+            self._enabled_participants()
+            .where(
+                ParticipantRow.email == identity.email.lower(),
+                ParticipantRow.id == participant_id,
+            )
+            .with_for_update()
         )
         if not row:
-            row = ParticipantRow(
-                id=str(uuid4()), name="", email=identity.email, subject=identity.subject
-            )
-            self.db.add(row)
-        elif row.subject and row.subject != identity.subject:
             raise AppError(ErrorKind.UNAUTHORIZED, "No fue posible asociar la identidad.")
-        else:
-            row.subject = identity.subject
-        self.db.flush()
+        if persist_subject:
+            if (
+                row.subject
+                and not row.subject.startswith("local:")
+                and row.subject != identity.subject
+            ):
+                raise AppError(ErrorKind.UNAUTHORIZED, "No fue posible asociar la identidad.")
+            try:
+                with self.db.begin_nested():
+                    row.subject = identity.subject
+                    self.db.flush()
+            except IntegrityError:
+                raise AppError(
+                    ErrorKind.UNAUTHORIZED, "No fue posible asociar la identidad."
+                ) from None
         return self._participant(row)
 
     def add_session(self, session: Session) -> None:
@@ -128,14 +173,62 @@ class SqlRepository:
         row, available = result
         return Event(row.id, row.title, row.category, row.date, row.hours, available)
 
+    @staticmethod
+    def _certificate(row: CertificateRow, title: str, category: str) -> Certificate:
+        return Certificate(
+            row.id,
+            row.event_id,
+            title,
+            category,
+            row.role,
+            row.status,
+            row.s3_bucket,
+            row.s3_key,
+            row.s3_version_id,
+        )
+
+    @staticmethod
+    def _certificates(participant_id: str):
+        return (
+            select(CertificateRow, EventRow.title, EventRow.category)
+            .join(EventRow, EventRow.id == CertificateRow.event_id)
+            .where(CertificateRow.participant_id == participant_id)
+        )
+
+    def add_certificate_download(
+        self, participant_id: str, event_id: str, certificate_id: str | None
+    ) -> None:
+        self.db.add(
+            CertificateDownloadRow(
+                id=str(uuid4()),
+                participant_id=participant_id,
+                event_id=event_id,
+                certificate_id=certificate_id,
+                downloaded_at_utc=datetime.now(UTC).isoformat(timespec="milliseconds"),
+            )
+        )
+
+    def certificates(self, participant_id: str) -> list[Certificate]:
+        result = self.db.execute(
+            self._certificates(participant_id).order_by(EventRow.title, CertificateRow.id)
+        )
+        return [self._certificate(*row) for row in result]
+
+    def certificate(self, participant_id: str, certificate_id: str) -> Certificate | None:
+        row = self.db.execute(
+            self._certificates(participant_id).where(CertificateRow.id == certificate_id)
+        ).one_or_none()
+        return self._certificate(*row) if row else None
+
 
 class SqlUnitOfWork:
-    def __init__(self, factory: sessionmaker[DbSession]):
+    def __init__(self, factory: sessionmaker[DbSession], repository=SqlRepository):
         self.factory = factory
+        self.repository = repository
 
     def __enter__(self) -> "SqlUnitOfWork":
         self.db = self.factory()
-        self.repo = SqlRepository(self.db)
+        self.repo = self.repository(self.db)
         return self
 
     def __exit__(self, *args: object) -> None:

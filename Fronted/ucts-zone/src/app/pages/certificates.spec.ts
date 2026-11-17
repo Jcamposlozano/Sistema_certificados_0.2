@@ -1,40 +1,85 @@
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Certificates } from './certificates';
-import { CertificateService } from '../core/certificate.service';
 
-describe('Certificate access', () => {
-  beforeEach(() => TestBed.configureTestingModule({ imports: [Certificates] }));
+describe('Acceso al portal de certificados', () => {
+  beforeEach(() =>
+    TestBed.configureTestingModule({
+      imports: [Certificates],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }),
+  );
 
-  it('rejects invalid emails before opening the OTP step', () => {
-    const page = TestBed.createComponent(Certificates).componentInstance;
-    page.emailForm.controls.email.setValue('invalid');
-    page.requestCode();
-    expect(page.step()).toBe('email');
-    expect(TestBed.inject(CertificateService).email()).toBe('');
-  });
+  afterEach(() => TestBed.inject(HttpTestingController).verify());
 
-  it('requires a valid demo code and clears access on logout', async () => {
+  function open() {
     const fixture = TestBed.createComponent(Certificates);
-    const page = fixture.componentInstance;
-    page.emailForm.controls.email.setValue('participant@example.com');
-    page.requestCode();
+    const http = TestBed.inject(HttpTestingController);
+    fixture.detectChanges();
+    return { fixture, page: fixture.componentInstance, http };
+  }
+
+  it('valida el correo y solicita un desafío al backend', async () => {
+    const { page, http } = open();
+    http.expectOne('/api/me').flush({}, { status: 401, statusText: 'Unauthorized' });
+    await Promise.resolve();
+
+    page.emailForm.controls.email.setValue('incorrecto');
+    await page.requestCode();
+    http.expectNone('/api/auth/otp/request');
+
+    page.emailForm.controls.email.setValue('participante@example.org');
+    const request = page.requestCode();
+    const otp = http.expectOne('/api/auth/otp/request');
+    expect(otp.request.body).toEqual({ email: 'participante@example.org' });
+    otp.flush({
+      challengeId: 'desafio-de-prueba',
+      resendAfter: 60,
+      expiresIn: 180,
+      message: 'Si tu cuenta permite el acceso, recibirás un código en tu correo.',
+    });
+    await request;
     expect(page.step()).toBe('otp');
-    page.otpForm.controls.code.setValue('999999');
-    page.verify();
-    expect(page.service.authenticated()).toBe(false);
-    expect(page.error()).toContain('no es correcto');
-    page.otpForm.controls.code.setValue('123456');
-    page.verify();
-    await fixture.whenStable();
-    const element = fixture.nativeElement as HTMLElement;
-    expect(element.querySelectorAll('.event-card')).toHaveLength(4);
-    expect(element.querySelector<HTMLButtonElement>('.event-card:last-child button')?.disabled).toBe(true);
-    page.category.set('Taller');
-    await fixture.whenStable();
-    expect(element.querySelectorAll('.event-card')).toHaveLength(1);
-    page.logout();
-    expect(page.service.authenticated()).toBe(false);
-    expect(page.service.email()).toBe('');
-    expect(page.step()).toBe('email');
+    expect(page.resendBlocked()).toBe(true);
+
+    page.otpForm.controls.code.setValue('111111');
+    const invalid = page.verify();
+    http.expectOne('/api/auth/otp/verify').flush({}, { status: 401, statusText: 'Unauthorized' });
+    await invalid;
+    expect(page.profile()).toBeNull();
+    expect(page.error()).toContain('Código inválido o vencido');
+
+    page.otpForm.controls.code.setValue('111222');
+    const valid = page.verify();
+    const verification = http.expectOne('/api/auth/otp/verify');
+    expect(verification.request.body).toEqual({
+      challengeId: 'desafio-de-prueba',
+      code: '111222',
+    });
+    verification.flush(null, { status: 204, statusText: 'No Content' });
+    await Promise.resolve();
+    http.expectOne('/api/me').flush({
+      id: 'persona',
+      name: 'Participante de prueba',
+      email: 'participante@example.org',
+    });
+    await Promise.resolve();
+    http.expectOne('/api/me/certificates').flush([
+      {
+        id: 'certificado',
+        title: 'Taller de prueba',
+        role: 'Asistente',
+        available: false,
+      },
+    ]);
+    await valid;
+    expect(page.items()?.length).toBe(1);
+
+    const logout = page.logout();
+    http.expectOne('/api/auth/logout').flush(null, { status: 204, statusText: 'No Content' });
+    await logout;
+    expect(page.profile()).toBeNull();
+    expect(page.items()).toBeNull();
   });
 });

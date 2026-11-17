@@ -20,7 +20,7 @@ PostgreSQL corre en Docker; DBeaver usa su controlador JDBC PostgreSQL, mientras
 4. Pulsa **Probar conexión**. Si DBeaver pide el controlador PostgreSQL, permite descargarlo.
 5. Guarda como **UCTS Zone · Local**.
 6. Ejecuta `poetry run alembic upgrade head`; refresca **Schemas → public → Tables**.
-7. Ejecuta `poetry run ucts seed` para cargar el usuario de ejemplo y tres participaciones.
+7. Ejecuta `poetry run ucts import-certificates` para cargar el [catálogo](certificate-catalog.md).
 
 Estas credenciales corresponden únicamente al contenedor local. El puerto está publicado solo en 127.0.0.1. El volumen `ucts_postgres_data` conserva los datos al detenerlo. `docker compose down` lo detiene; no uses `down -v` si necesitas conservar los datos.
 
@@ -35,11 +35,9 @@ SELECT current_database(), current_user, version();
 SELECT table_name FROM information_schema.tables
 WHERE table_schema = 'public' ORDER BY table_name;
 
-SELECT p.email, e.title, e.date, e.hours, a.available
-FROM attendances a
-JOIN participants p ON p.id = a.participant_id
-JOIN events e ON e.id = a.event_id
-ORDER BY e.date DESC;
+SELECT status, count(*) FROM certificates GROUP BY status ORDER BY status;
+
+SELECT sheet, count(*) FROM certificate_sources GROUP BY sheet ORDER BY sheet;
 ```
 
 No compartas ni exportes las tablas temporales de autenticación. Usa nuevas credenciales, roles con permisos mínimos y una base separada para producción.

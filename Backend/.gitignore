@@ -6,3 +6,6 @@ __pycache__/
 *.egg-info/
 *.db
 .coverage
+
+# Datos personales y manifiestos operativos.
+data/
