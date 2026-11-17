@@ -195,3 +195,32 @@ def test_downloads_use_authenticated_catalog_and_record_audit(catalog):
     for participant_id, certificate_id, event_id, timestamp in entries:
         assert (participant_id, certificate_id, event_id) == (me, first_cert, listing[0]["eventId"])
         assert start <= datetime.fromisoformat(timestamp) <= datetime.now(UTC)
+
+
+def test_missing_credentials_returns_503_and_preserves_request_limits(catalog):
+    from unittest.mock import Mock
+
+    from botocore.exceptions import NoCredentialsError
+
+    from ucts.adapters.identity.cognito import CognitoIdentityProvider, CognitoUserPool
+
+    client, *_ = catalog
+    pool = CognitoUserPool(
+        None, "us-east-2_synthetic", client_factory=Mock(side_effect=NoCredentialsError())
+    )
+    client.app.state.auth.provider = CognitoIdentityProvider(
+        Mock(), "synthetic-client", user_pool=pool
+    )
+    response = client.post(
+        "/api/auth/otp/request", headers=ORIGIN, json={"email": "principal@example.org"}
+    )
+    assert response.status_code == 503
+    assert "challengeId" not in response.json()
+    assert client.get("/api/me").status_code == 401
+
+    response = client.post(
+        "/api/auth/otp/request", headers=ORIGIN, json={"email": "principal@example.org"}
+    )
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "60"
+    assert pool.client_factory.call_count == 1
